@@ -27,7 +27,8 @@ use crate::window_size::remember_window_size;
 use adw::{prelude::*, subclass::prelude::*};
 use gettextrs::gettext;
 use gtk::{gio, glib};
-use rand::rng;
+//emi
+//use rand::rng;
 use std::error::Error;
 use std::rc::Rc;
 
@@ -176,6 +177,9 @@ impl RobotsWindow {
         settings: &gio::Settings,
         game_configs: GameConfigs,
         assets: &Rc<dyn Assets>,
+        //emi
+        game: Rc<Game>,
+        //emi
     ) -> Result<Self, Box<dyn Error>> {
         let this: Self = glib::Object::builder()
             .property("application", application)
@@ -230,8 +234,9 @@ impl RobotsWindow {
             .build();
         headerbar.pack_end(&menu_button);
 
-        let game = Game::new(game_configs.best_match(&settings.selected_config()), rng());
-        game.start_new_game();
+        //emi
+        //let game = Game::new(game_configs.best_match(&settings.selected_config()), rng());
+        //game.start_new_game();
 
         let game_area = GameArea::new(game_configs, assets, settings)?;
         game_area.connect_updated(glib::clone!(

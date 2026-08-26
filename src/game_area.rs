@@ -53,7 +53,9 @@ mod imp {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     pub struct GameArea {
-        pub game: RefCell<Option<Game>>,
+        //emi
+        pub game: RefCell<Option<Rc<Game>>>,
+        //emi
         pub game_listener_id: Cell<Option<ListenerId>>,
         pub game_configs: OnceCell<GameConfigs>,
         pub assets: OnceCell<Rc<dyn Assets>>,
@@ -292,11 +294,14 @@ impl GameArea {
         Ok(this)
     }
 
-    pub fn game(&self) -> Ref<'_, Option<Game>> {
+    pub fn game(&self) -> Ref<'_, Option<Rc<Game>>> {
         self.imp().game.borrow()
     }
 
-    pub fn set_game(&self, game: Game) {
+    pub fn set_game(&self, game: Rc<Game>) {
+        //emi
+        //self.imp().game.set(game).ok().unwrap();
+        //emi
         let mut this_game = self.imp().game.borrow_mut();
 
         if let Some(listener_id) = self.imp().game_listener_id.take()

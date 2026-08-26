@@ -28,7 +28,11 @@ mod imp {
     use crate::{
         assets::{Assets, DirectoryAssets},
         config::DATA_DIRECTORY,
+        //emi
+        game::Game,
+        //emi
         game_config::GameConfigs,
+        properties::Properties,
         properties_dialog::show_preferences,
         window::RobotsWindow,
     };
@@ -37,6 +41,9 @@ mod imp {
     pub struct RobotsApplication {
         settings: gio::Settings,
         game_configs: GameConfigs,
+        //emi
+        game: OnceCell<Rc<Game>>,
+        //emi
         assets: OnceCell<Rc<dyn Assets>>,
     }
 
@@ -50,6 +57,9 @@ mod imp {
             Self {
                 settings: gio::Settings::new("org.gnome.Robots"),
                 game_configs: GameConfigs::new(),
+                //emi
+                game: Default::default(),
+                //emi
                 assets: Default::default(),
             }
         }
@@ -107,21 +117,52 @@ mod imp {
                     self.obj().quit();
                 }
             }
+            // emi
+            let game = Game::new(self.game_configs.best_match(&self.settings.selected_config()), rand::rng());
+            game.start_new_game();
+            self.game.set(Rc::new(game)).ok().unwrap();
+            // emi
         }
 
         fn activate(&self) {
             self.parent_activate();
 
-            if let Some(window) = self.obj().active_window().and_downcast::<RobotsWindow>() {
-                window.present();
-                return;
-            }
+            //emi
+            //if let Some(window) = self.obj().active_window().and_downcast::<RobotsWindow>() {
+            //    window.present();
+            //    return;
+           // }
 
+           //1st window
             match RobotsWindow::new(
                 &*self.obj(),
                 &self.settings,
                 self.game_configs.clone(),
                 self.assets.get().unwrap(),
+                //emi
+                self.game.get().unwrap().clone(),
+                //emi
+            ) {
+                Ok(window) => {
+                    window.present();
+                    window.focus_game();
+                }
+                Err(e) => {
+                    eprintln!("CRITICAL: {}", e);
+                    // TODO message box
+                    self.obj().quit();
+                }
+            }
+
+            //2nd window
+            match RobotsWindow::new(
+                &*self.obj(),
+                &self.settings,
+                self.game_configs.clone(),
+                self.assets.get().unwrap(),
+                //emi
+                self.game.get().unwrap().clone(),
+                //emi
             ) {
                 Ok(window) => {
                     window.present();
