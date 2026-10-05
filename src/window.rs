@@ -266,6 +266,100 @@ impl RobotsWindow {
         Ok(this)
     }
 
+    pub fn new_parcial(
+        application: &impl IsA<gtk::Application>,
+        settings: &gio::Settings,
+        game_configs: GameConfigs,
+        assets: &Rc<dyn Assets>,
+        //emi
+        game: Rc<Game>,
+        //emi
+    ) -> Result<Self, Box<dyn Error>> {
+        let this: Self = glib::Object::builder()
+            .property("application", application)
+            .build();
+
+        remember_window_size(this.upcast_ref(), settings);
+        this.imp().settings.set(settings.clone()).ok().unwrap();
+
+        let vbox = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        this.set_content(Some(&vbox));
+
+        let headerbar = adw::HeaderBar::builder()
+            .title_widget(&this.imp().window_title)
+            .build();
+        vbox.append(&headerbar);
+
+        let appmenu = gio::Menu::new();
+        appmenu.append_section(None, &{
+            let section = gio::Menu::new();
+            section.append_item(&gio::MenuItem::new(
+                Some(&gettext("_New Game")),
+                Some("app.new-game"),
+            ));
+            section.append_item(&gio::MenuItem::new(
+                Some(&gettext("_Scores")),
+                Some("app.scores"),
+            ));
+            section
+        });
+        appmenu.append_section(None, &{
+            let section = gio::Menu::new();
+            section.append_item(&gio::MenuItem::new(
+                Some(&gettext("_Preferences")),
+                Some("app.preferences"),
+            ));
+            section.append_item(&gio::MenuItem::new(
+                Some(&gettext("_Help")),
+                Some("app.help"),
+            ));
+            section.append_item(&gio::MenuItem::new(
+                Some(&gettext("_About Robots")),
+                Some("app.about"),
+            ));
+            section
+        });
+
+        let menu_button = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .menu_model(&appmenu)
+            .build();
+        headerbar.pack_end(&menu_button);
+
+        //emi
+        //let game = Game::new(game_configs.best_match(&settings.selected_config()), rng());
+        //game.start_new_game();
+
+        let game_area = GameArea::new_parcial(game_configs, assets, settings)?;
+        game_area.connect_updated(glib::clone!(
+            #[weak]
+            this,
+            move |ga| this.update_game_status(ga.game().as_ref().unwrap())
+        ));
+
+        let gridframe = gtk::AspectFrame::builder()
+            .ratio((game.width() as f32) / (game.height() as f32))
+            .hexpand(true)
+            .vexpand(true)
+            .child(&game_area)
+            .build();
+
+        game_area.set_game(game);
+        this.imp().game_area.set(game_area).ok().unwrap();
+
+        let toolbar_view = adw::ToolbarView::builder().content(&gridframe).build();
+
+        let action_bar = gtk::ActionBar::builder().build();
+        action_bar.set_center_widget(Some(&imp::button_box(&this.imp().safe_teleports_label)));
+        toolbar_view.add_bottom_bar(&action_bar);
+
+        vbox.append(&toolbar_view);
+
+        Ok(this)
+    }
+
     fn update_game_status(&self, game: &Game) {
         let status = game.status();
 

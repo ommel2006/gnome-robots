@@ -155,7 +155,7 @@ mod imp {
             }
 
             //2nd window
-            match RobotsWindow::new(
+            match RobotsWindow::new_parcial(
                 &*self.obj(),
                 &self.settings,
                 self.game_configs.clone(),

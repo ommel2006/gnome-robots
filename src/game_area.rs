@@ -69,6 +69,9 @@ mod imp {
         pub robot2_animation: Box<dyn InfiniteAnimation>,
         pub sound_player: SoundPlayer,
         pub settings: OnceCell<gio::Settings>,
+        //emi
+        pub parcial_rendered: Cell<bool>,
+        //emi
     }
 
     #[glib::object_subclass]
@@ -95,6 +98,10 @@ mod imp {
 
                 sound_player: SoundPlayer::new(),
                 settings: Default::default(),
+
+                //emi
+                parcial_rendered: Cell::new(false),
+                //emi
             }
         }
     }
@@ -195,8 +202,45 @@ mod imp {
             let tile_height = (self.obj().height() as f64) / (game.height() as f64);
             let assets = self.assets.get().unwrap();
 
-            for y in 0..game.height() {
-                for x in 0..game.width() {
+            //emi
+
+            let player = game.player();
+
+            let render_y_start = if self.parcial_rendered.get() {
+                player.y.saturating_sub(1)
+            } else {
+                0
+            };
+
+            let render_x_start = if self.parcial_rendered.get() {
+                player.x.saturating_sub(1)
+            } else {
+                0
+            };
+
+            let render_y_end = if self.parcial_rendered.get() {
+                if player.y+2 > game.height() {
+                    game.height()
+                } else {
+                    player.y+2
+                }
+            } else {
+                game.height()
+            };
+
+            let render_x_end = if self.parcial_rendered.get() {
+                if player.x+2 > game.width() {
+                    game.width()
+                } else {
+                    player.x+2
+                }
+            } else {
+                game.width()
+            };
+
+            //emi
+            for y in render_y_start..render_y_end {
+                for x in render_x_start..render_x_end {
                     let position = Position { x, y };
 
                     let tile_rect = graphene::Rect::new(
@@ -277,6 +321,34 @@ impl GameArea {
         settings: &gio::Settings,
     ) -> Result<Self, Box<dyn Error>> {
         let this: Self = glib::Object::builder().build();
+
+        this.imp().game_configs.set(game_configs).ok().unwrap();
+        this.imp().assets.set(assets.clone()).ok().unwrap();
+        this.set_background_color(settings.bgcolour());
+        *this.imp().theme.borrow_mut() = Some(themes::find_best_match(
+            &assets.themes(),
+            &settings.theme(),
+        )?);
+        this.imp().settings.set(settings.clone()).ok().unwrap();
+
+        settings_aware_widget(&this, settings, None, |ga, s| ga.properties_changed_cb(s));
+
+        this.start_new_game();
+
+        Ok(this)
+    }
+
+    //optional parcial_render constructor
+    pub fn new_parcial(
+        game_configs: GameConfigs,
+        assets: &Rc<dyn Assets>,
+        settings: &gio::Settings,
+    ) -> Result<Self, Box<dyn Error>> {
+        let this: Self = glib::Object::builder().build();
+
+        //emi
+        this.imp().parcial_rendered.set(true);
+        //emi
 
         this.imp().game_configs.set(game_configs).ok().unwrap();
         this.imp().assets.set(assets.clone()).ok().unwrap();
