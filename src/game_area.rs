@@ -40,6 +40,10 @@ const MINIMUM_TILE_HEIGHT: u32 = 8;
 const ANIMATION_DELAY_MILLIS: u64 = 100;
 const ANIMATION_DELAY: Duration = Duration::from_millis(ANIMATION_DELAY_MILLIS);
 
+const PARTIAL_MIN_RADIUS: u32 = 1;
+const PARTIAL_MAX_RADIUS: u32 = 5;
+const PARTIAL_RADIUS_CHANGE_TICKS: u32 = 50; // 50 ticks * 100ms = every 5 seconds
+
 mod imp {
     use super::*;
     use crate::arena::Position;
@@ -71,6 +75,8 @@ mod imp {
         pub settings: OnceCell<gio::Settings>,
         //emi
         pub parcial_rendered: Cell<bool>,
+        pub partial_radius: Cell<u32>,
+        pub partial_ticks: Cell<u32>,
         //emi
     }
 
@@ -101,6 +107,8 @@ mod imp {
 
                 //emi
                 parcial_rendered: Cell::new(false),
+                partial_radius: Cell::new(PARTIAL_MIN_RADIUS),
+                partial_ticks: Cell::new(0),
                 //emi
             }
         }
@@ -206,36 +214,17 @@ mod imp {
 
             let player = game.player();
 
-            let render_y_start = if self.parcial_rendered.get() {
-                player.y.saturating_sub(2)
+            let (render_x_start, render_x_end, render_y_start, render_y_end) =
+            if self.parcial_rendered.get() {
+                let r = self.partial_radius.get();
+                (
+                    player.x.saturating_sub(r),
+                    (player.x + r + 1).min(game.width()),
+                    player.y.saturating_sub(r),
+                    (player.y + r + 1).min(game.height()),
+                )
             } else {
-                0
-            };
-
-            let render_x_start = if self.parcial_rendered.get() {
-                player.x.saturating_sub(2)
-            } else {
-                0
-            };
-
-            let render_y_end = if self.parcial_rendered.get() {
-                if player.y+2 > game.height() {
-                    game.height()
-                } else {
-                    player.y+3
-                }
-            } else {
-                game.height()
-            };
-
-            let render_x_end = if self.parcial_rendered.get() {
-                if player.x+2 > game.width() {
-                    game.width()
-                } else {
-                    player.x+3
-                }
-            } else {
-                game.width()
+                (0, game.width(), 0, game.height())
             };
 
             //emi
@@ -412,7 +401,27 @@ impl GameArea {
             game.tick();
             self.emit_by_name::<()>("updated", &[]);
         }
+        self.update_partial_radius();
         self.queue_draw();
+    }
+
+    fn update_partial_radius(&self) {
+        let imp = self.imp();
+        if !imp.parcial_rendered.get() {
+            return; // the full window never changes
+        }
+
+        let ticks = imp.partial_ticks.get() + 1;
+        if ticks >= PARTIAL_RADIUS_CHANGE_TICKS {
+            imp.partial_ticks.set(0);
+            if imp.partial_radius.get() == PARTIAL_MAX_RADIUS {
+                imp.partial_radius.set(PARTIAL_MIN_RADIUS);
+            } else {
+                imp.partial_radius.set(PARTIAL_MAX_RADIUS);
+            }
+        } else {
+            imp.partial_ticks.set(ticks);
+        }
     }
 
     fn mouse_cb(&self, _n_press: i32, x: f64, y: f64) {
@@ -552,6 +561,10 @@ impl GameArea {
     }
 
     async fn on_game_event(&self, event: GameEvent) {
+        // The partial view only mirrors the game; the full view handles events.
+        if self.imp().parcial_rendered.get() {
+            return;
+        }
         match event {
             GameEvent::Teleported => self.play_sound(Sound::Teleport),
             GameEvent::Splat => self.play_sound(Sound::Splat),

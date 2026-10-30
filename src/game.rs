@@ -86,7 +86,7 @@ pub const DEAD_DELAY: u32 = 30;
 pub const CHANGE_DELAY: u32 = 20;
 
 const ROBOT_STEP_EVERY_TICKS: u32 = 20;
-const MAX_EXTRA_MOVES: u32 = 1;
+const MAX_EXTRA_MOVES: u32 = 2;
 
 pub struct Status {
     pub score: u32,
