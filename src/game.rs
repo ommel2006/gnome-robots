@@ -24,7 +24,9 @@ use crate::{
 };
 use std::cell::{Cell, RefCell};
 use std::iter::{chain, repeat_n};
+use std::collections::HashMap;
 use std::rc::Rc;
+use rand::RngExt;
 
 #[derive(Clone, Copy)]
 pub enum PlayerCommand {
@@ -83,6 +85,9 @@ pub const GAME_HEIGHT: u32 = 30;
 pub const DEAD_DELAY: u32 = 30;
 pub const CHANGE_DELAY: u32 = 20;
 
+const ROBOT_STEP_EVERY_TICKS: u32 = 20;
+const MAX_EXTRA_MOVES: u32 = 1;
+
 pub struct Status {
     pub score: u32,
     pub current_level: u32,
@@ -137,6 +142,11 @@ pub struct Game {
     kills: Cell<u32>,
     safe_teleports: Cell<u32>,
 
+    robot_tick_count: Cell<u32>,
+    has_moved_for_first_time: Cell<bool>,
+
+    extra_moves: RefCell<HashMap<(u32, u32), u32>>,
+
     pub on_game_event: Slot<GameEvent>,
 }
 
@@ -154,6 +164,12 @@ impl Game {
             score: Cell::new(0),
             kills: Cell::new(0),
             safe_teleports: Cell::new(0),
+
+            robot_tick_count: Cell::new(0),
+            has_moved_for_first_time: Cell::new(false),
+
+            extra_moves: RefCell::new(HashMap::new()),
+
             on_game_event: Slot::new(),
         }
     }
@@ -244,6 +260,10 @@ impl Game {
 
     /// Creates a new level and populates it with robots
     fn generate_level(&self) {
+
+        self.has_moved_for_first_time.set(false);
+        self.extra_moves.borrow_mut().clear();
+
         let config = self.config.borrow().clone();
 
         let arena = self.arena.borrow_mut();
@@ -329,26 +349,7 @@ impl Game {
 
     pub fn tick(&self) {
         match self.state.get() {
-            State::Type2 => {
-                let new_arena = self.move_type2_robots();
-                let change = ArenaChange {
-                    arena: new_arena,
-                    player: self.player.get(),
-                    push: None,
-                };
-                self.update_arena(change);
-                self.state.set(State::Playing);
-            }
-            State::WaitingType2 => {
-                let new_arena = self.move_type2_robots();
-                let change = ArenaChange {
-                    arena: new_arena,
-                    player: self.player.get(),
-                    push: None,
-                };
-                self.update_arena(change);
-                self.state.set(State::Waiting);
-            }
+            State::Type2 | State::WaitingType2 => self.extra_move_pass(),
             State::Waiting => {
                 self.splat.set(None);
                 self.move_robots();
@@ -371,7 +372,20 @@ impl Game {
                     self.start_new_game();
                 }
             }
-            State::Playing => {}
+            State::Playing => {
+
+                if self.has_moved_for_first_time.get() {
+                    let next = self.robot_tick_count.get() + 1;
+
+                    if next >= ROBOT_STEP_EVERY_TICKS {
+                        self.robot_tick_count.set(0);
+                        self.move_robots();
+                    } else {
+                        self.robot_tick_count.set(next);
+                    }
+                }
+
+            }
         }
     }
 
@@ -395,6 +409,54 @@ impl Game {
         self.state.set(State::Playing);
     }
 
+    /// Generates extra moves for type2 robots
+    fn roll_extra_moves(&self, arena: &Arena) {
+        let mut extras = self.extra_moves.borrow_mut();
+        extras.clear();
+        let mut rng = self.rand.borrow_mut();
+        for x in 0..arena.width() {
+            for y in 0..arena.height() {
+                if arena.get(Position { x, y }) == ObjectType::Robot2 {
+                    let n = rng.random_range(0..=MAX_EXTRA_MOVES);
+                    if n > 0 {
+                        extras.insert((x, y), n);
+                    }
+                }
+            }
+        }
+    }
+
+    fn extra_move_pass(&self) {
+        let movers = self.extra_moves.borrow().clone();
+
+        let (new_arena, moves) = Self::chase_extra(
+            &self.arena.borrow(),
+            &movers,
+            self.player.get(),
+            |victim| self.add_kill(victim),
+        );
+
+        // carry remaining counts over to the robots' new positions
+        let mut next = HashMap::new();
+        for (from, to) in moves {
+            let left = movers[&from] - 1;
+            if left > 0 && new_arena.get(Position { x: to.0, y: to.1 }) == ObjectType::Robot2 {
+                next.insert(to, left);
+            }
+        }
+        *self.extra_moves.borrow_mut() = next;
+
+        self.update_arena(ArenaChange { arena: new_arena, player: self.player.get(), push: None });
+
+        if self.extra_moves.borrow().is_empty() {
+            match self.state.get() {
+                State::Type2 => self.state.set(State::Playing),
+                State::WaitingType2 => self.state.set(State::Waiting),
+                _ => {} // Dead or Complete: leave it alone
+            }
+        }
+    }
+
     /// Moves all of the robots and checks for collisions
     fn move_all_robots(&self) -> Arena {
         return Self::chase(
@@ -405,26 +467,16 @@ impl Game {
         );
     }
 
-    /// Makes the extra move for all of the type2 robots
-    fn move_type2_robots(&self) -> Arena {
-        return Self::chase(
-            &self.arena.borrow(),
-            |obj| obj == ObjectType::Robot2,
-            self.player.get(),
-            |victim| self.add_kill(victim),
-        );
-    }
-
     /// Starts the process of moving robots
     fn move_robots(&self) {
         let new_arena = self.move_all_robots();
+        self.roll_extra_moves(&new_arena);
 
-        let num_robots2 = new_arena.count(|obj| obj == ObjectType::Robot2);
-        if num_robots2 > 0 {
-            if self.state.get() == State::Waiting {
-                self.state.set(State::WaitingType2);
-            } else if self.state.get() == State::Playing {
-                self.state.set(State::Type2);
+        if !self.extra_moves.borrow().is_empty() {
+            match self.state.get() {
+                State::Waiting => self.state.set(State::WaitingType2),
+                State::Playing => self.state.set(State::Type2),
+                _ => {}
             }
         }
 
@@ -482,29 +534,82 @@ impl Game {
 
         new_arena
     }
+    fn chase_extra(
+        arena: &Arena,
+        movers: &HashMap<(u32, u32), u32>,
+        player: Position,
+        track_kill: impl Fn(ObjectType),
+    ) -> (Arena, Vec<((u32, u32), (u32, u32))>) {
+        // clear the player and all Robot2s, then put the idle Robot2s back
+        let new_arena = arena.map(|obj| {
+            if obj == ObjectType::Player || obj == ObjectType::Robot2 { ObjectType::None } else { obj }
+        });
+        for x in 0..arena.width() {
+            for y in 0..arena.height() {
+                let p = Position { x, y };
+                if arena.get(p) == ObjectType::Robot2 && !movers.contains_key(&(x, y)) {
+                    new_arena.set(p, ObjectType::Robot2);
+                }
+            }
+        }
+
+        let mut moves = Vec::new();
+        for x in 0..arena.width() {
+            for y in 0..arena.height() {
+                let p = Position { x, y };
+                if arena.get(p) == ObjectType::Robot2 && movers.contains_key(&(x, y)) {
+                    let dest = p.move_by(
+                        ((player.x as i32) - (x as i32)).signum(),
+                        ((player.y as i32) - (y as i32)).signum(),
+                    );
+                    let at = new_arena.get(dest);
+                    if at == ObjectType::Heap {
+                        track_kill(ObjectType::Robot2);
+                    } else if at == ObjectType::Robot1 || at == ObjectType::Robot2 {
+                        track_kill(ObjectType::Robot2);
+                        track_kill(at);
+                        new_arena.set(dest, ObjectType::Heap);
+                    } else {
+                        new_arena.set(dest, ObjectType::Robot2);
+                        moves.push(((x, y), (dest.x, dest.y)));
+                    }
+                }
+            }
+        }
+
+        if new_arena.get(player) == ObjectType::None {
+            new_arena.set(player, ObjectType::Player);
+        }
+        (new_arena, moves)
+    }
 
     /// checks whether a given location is safe
+    /// checks whether a given location is safe
     fn check_safe(&self, change: &ArenaChange) -> bool {
-        let temp2_arena = Self::chase(
+        // Normal step: every robot moves once.
+        let mut arena = Self::chase(
             &change.arena,
             |obj| obj == ObjectType::Robot1 || obj == ObjectType::Robot2,
             change.player,
             |_| {},
         );
 
-        if temp2_arena.get(change.player) != ObjectType::Player {
+        if arena.get(change.player) != ObjectType::Player {
             return false;
         }
 
-        let temp3_arena = Self::chase(
-            &temp2_arena,
-            |obj| obj == ObjectType::Robot2,
-            change.player,
-            |_| {},
-        );
+        // Worst case: every Robot2 gets the maximum of 2 extra moves.
+        for _ in 0..MAX_EXTRA_MOVES {
+            arena = Self::chase(
+                &arena,
+                |obj| obj == ObjectType::Robot2,
+                change.player,
+                |_| {},
+            );
 
-        if temp3_arena.get(change.player) != ObjectType::Player {
-            return false;
+            if arena.get(change.player) != ObjectType::Player {
+                return false;
+            }
         }
 
         true
@@ -724,7 +829,8 @@ impl Game {
             | PlayerCommand::SE => {
                 let direction = cmd.to_direction().unwrap();
                 if self.player_move(direction.0, direction.1, safety) {
-                    self.move_robots();
+                    //self.move_robots();
+                    self.has_moved_for_first_time.set(true);
                     true
                 } else {
                     false

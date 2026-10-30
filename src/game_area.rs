@@ -207,13 +207,13 @@ mod imp {
             let player = game.player();
 
             let render_y_start = if self.parcial_rendered.get() {
-                player.y.saturating_sub(1)
+                player.y.saturating_sub(2)
             } else {
                 0
             };
 
             let render_x_start = if self.parcial_rendered.get() {
-                player.x.saturating_sub(1)
+                player.x.saturating_sub(2)
             } else {
                 0
             };
@@ -222,7 +222,7 @@ mod imp {
                 if player.y+2 > game.height() {
                     game.height()
                 } else {
-                    player.y+2
+                    player.y+3
                 }
             } else {
                 game.height()
@@ -232,7 +232,7 @@ mod imp {
                 if player.x+2 > game.width() {
                     game.width()
                 } else {
-                    player.x+2
+                    player.x+3
                 }
             } else {
                 game.width()

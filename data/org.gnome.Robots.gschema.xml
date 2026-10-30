@@ -11,7 +11,7 @@
       <description>Background color.  The hex specification of the background color.</description>
     </key>
     <key name="configuration" type="s">
-      <default>"classic_robots"</default>
+      <default>"robots2"</default>
       <summary>Game type</summary>
       <description>Game type.  The name of the game variation to use.</description>
     </key>
