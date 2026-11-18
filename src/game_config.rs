@@ -166,7 +166,7 @@ fn nightmare() -> GameConfig {
         name: "nightmare",
         display_name: gettext("Nightmare"),
         robot_type1: RobotTypeConfig {
-            initial: 2,
+            initial: 6,
             increment: 2,
             maximum: 9999,
             score: 10,
@@ -175,7 +175,7 @@ fn nightmare() -> GameConfig {
         },
         robot_type2: RobotTypeConfig {
             initial: 8,
-            increment: 8,
+            increment: 6,
             maximum: 9999,
             score: 20,
             score_waiting: 20,

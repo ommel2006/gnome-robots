@@ -85,7 +85,8 @@ pub const GAME_HEIGHT: u32 = 30;
 pub const DEAD_DELAY: u32 = 30;
 pub const CHANGE_DELAY: u32 = 20;
 
-const ROBOT_STEP_EVERY_TICKS: u32 = 20;
+const ROBOT_STEP_EVERY_TICKS: u32 = 25;
+const ROBOT_MISDIRECTION_PROBABILITY: f64 = 0.08;
 const MAX_EXTRA_MOVES: u32 = 2;
 
 pub struct Status {
@@ -508,10 +509,32 @@ impl Game {
                 let position = Position { x, y };
                 let who = arena.get(position);
                 if (is_chaser)(who) {
-                    let new_postions = position.move_by(
-                        ((player.x as i32) - (position.x as i32)).signum(),
-                        ((player.y as i32) - (position.y as i32)).signum(),
-                    );
+                    let chase_dx = ((player.x as i32) - (position.x as i32)).signum();
+                    let chase_dy = ((player.y as i32) - (position.y as i32)).signum();
+
+                    let mut rng = rand::rng();
+                    let (dx, dy) = if rng.random_bool(ROBOT_MISDIRECTION_PROBABILITY) {
+                        let mut options = vec![
+                            (-1, -1),
+                            (-1, 0),
+                            (-1, 1),
+                            (0, -1),
+                            (0, 1),
+                            (1, -1),
+                            (1, 0),
+                            (1, 1),
+                        ];
+                        options.retain(|(ox, oy)| (*ox, *oy) != (chase_dx, chase_dy));
+                        if options.is_empty() {
+                            (chase_dx, chase_dy)
+                        } else {
+                            options[rng.random_range(0..options.len())]
+                        }
+                    } else {
+                        (chase_dx, chase_dy)
+                    };
+
+                    let new_postions = position.move_by(dx, dy);
 
                     let destination = new_arena.get(new_postions);
                     if destination == ObjectType::Heap {
@@ -583,11 +606,39 @@ impl Game {
         (new_arena, moves)
     }
 
-    /// checks whether a given location is safe
+    fn simulate_remaining_extra_moves(&self, arena: &Arena) -> Arena {
+        let mut current_arena = arena.map(|obj| obj);
+        let mut remaining = self.extra_moves.borrow().clone();
+
+        while !remaining.is_empty() {
+            let (next_arena, moves) = Self::chase_extra(
+                &current_arena,
+                &remaining,
+                self.player.get(),
+                |_| {},
+            );
+
+            let mut next_remaining = HashMap::new();
+            for ((from_x, from_y), (to_x, to_y)) in moves {
+                let left = remaining.get(&((from_x, from_y))).copied().unwrap_or(0) - 1;
+                if left > 0
+                    && next_arena.get(Position { x: to_x, y: to_y }) == ObjectType::Robot2
+                {
+                    next_remaining.insert((to_x, to_y), left);
+                }
+            }
+
+            current_arena = next_arena;
+            remaining = next_remaining;
+        }
+
+        current_arena
+    }
+
     /// checks whether a given location is safe
     fn check_safe(&self, change: &ArenaChange) -> bool {
         // Normal step: every robot moves once.
-        let mut arena = Self::chase(
+        let arena = Self::chase(
             &change.arena,
             |obj| obj == ObjectType::Robot1 || obj == ObjectType::Robot2,
             change.player,
@@ -598,21 +649,8 @@ impl Game {
             return false;
         }
 
-        // Worst case: every Robot2 gets the maximum of 2 extra moves.
-        for _ in 0..MAX_EXTRA_MOVES {
-            arena = Self::chase(
-                &arena,
-                |obj| obj == ObjectType::Robot2,
-                change.player,
-                |_| {},
-            );
-
-            if arena.get(change.player) != ObjectType::Player {
-                return false;
-            }
-        }
-
-        true
+        let arena = self.simulate_remaining_extra_moves(&arena);
+        arena.get(change.player) == ObjectType::Player
     }
 
     fn try_push_heap(&self, dx: i32, dy: i32) -> Option<ArenaChange> {
